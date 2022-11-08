@@ -89,7 +89,7 @@ module Auth
       end
       puts list.map { |k, v| "#{k}: #{v}" }.sort
     end
-    nil
   end
-  nil
-end; nil
+end
+
+Auth::OTP.new
