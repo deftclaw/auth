@@ -1,5 +1,9 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
 require 'auth/version'
 
+# Encrypt-store OTP keys and access them quickly when you need them
 module Auth
   # Create or read OTP keys
   class OTP
@@ -11,15 +15,25 @@ module Auth
 
     MSG = {
       create: 'Create a password to protect OTP keys:',
+      more: 'Would you like to add another OTP key? ',
       name: 'What service do you login to with this OTP? (amazon, google)',
       secret: 'Paste / Carefully-type the OTP secret string:',
       syms: ['!', '@', '#', '$', '%', '&', '*', '+', '=', '-']
     }.freeze
 
+
     def initialize
+      @otp_key = {}
       leaf = ENV['OTP'] || "#{ENV['HOME']}/.config/otp.yml"
 
       File.file?(leaf) ? (read leaf) : (create leaf)
+    end
+
+    def create_password
+      Digest::SHA1.hexdigest(ask(MSG[:create]) { |io| io.echo = MSG[:syms].sample })
+                  .chars
+                  .first(32)
+                  .join
     end
 
     def create(save_leaf)
@@ -27,39 +41,40 @@ module Auth
 
       # Create the cipher since it is a new file
       c = OpenSSL::Cipher.new('aes-256-cbc')
-      c.encrypt
-
-      # Stage Key-components
-      k = Digest::SHA1.hexdigest(
-        ask(MSG[:create]) { |io| io.echo = MSG[:syms].sample }
-      ).chars.first(32).join
-      iv = c.random_iv
 
       # Load encryption Cipher
-      c.key = k
-      c.iv = iv
+      c.key = create_password
 
       # Initialize an OTP key
-      add cipher: c, path: save_leaf, civ: iv
+      add
+      save cipher: c, path: save_leaf
     end
 
-    def add(cipher:, path:, civ:)
-      # Prompt user for OTP service and secret
-      otp_label  = HighLine.new.ask(MSG[:name])
-      otp_secret = HighLine.new.ask(MSG[:secret])
+    def add
+      more = 'y'
 
-      # Encrypt the secret (and it's label)
-      enc =  cipher.update(otp_secret)
-      enc << cipher.final
+      while more =~ /y/
+        # Prompt user for OTP service and secret
+        @otp_key.merge!({ HighLine.new.ask(MSG[:name]) => HighLine.new.ask(MSG[:secret]) })
+        more = HighLine.new.ask(MSG[:more])
+      end
+    end
 
-      # Stage the data to be saved
-      data = {
-        iv: civ.to_s,
-        "#{otp_label}": enc
-      }.to_yaml
+    def save(cipher:, path:)
+      data = { iv: cipher.random_iv.to_s }
+
+      @otp_key.each_with_index do |name, secret|
+        # Encrypt the secret
+        cipher.encrypt
+        encrypted = cipher.update(secret)
+        encrypted << cipher.final
+
+        # Stage the data to be saved
+        data.merge!({ name => encrypted })
+      end
 
       # Save the OTP file
-      File.write(path, data, mode: 'wb')
+      File.write(path, data.to_yaml, mode: 'wb')
     end
 
     def delete(otpe); end
