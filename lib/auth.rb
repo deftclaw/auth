@@ -100,7 +100,7 @@ module Auth
       end
 
       instance_variables.each do |v|
-        list.merge!({ instance_variable_get(v).issuer => instance_variable_get(v).now })
+        list.merge!({ instance_variable_get(v).issuer => instance_variable_get(v).at(Time.now.to_i + 30) })
       end
       puts list.map { |k, v| "#{k}: #{v}" }.sort
     end
