@@ -100,7 +100,9 @@ module Auth
       end
 
       instance_variables.each do |v|
-        list.merge!({ instance_variable_get(v).issuer => instance_variable_get(v).at(Time.now.to_i + 30) })
+        next if [:@otp_key].include?(v)
+
+        list.merge!({ instance_variable_get(v).issuer => instance_variable_get(v).at(Time.now.to_i + 20) })
       end
       puts list.map { |k, v| "#{k}: #{v}" }.sort
     end
