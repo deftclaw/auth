@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'auth/version'
+# require 'auth/version'
 
 # Encrypt-store OTP keys and access them quickly when you need them
 module Auth
@@ -39,15 +39,10 @@ module Auth
     def create(save_leaf)
       exit if File.exist? save_leaf
 
-      # Create the cipher since it is a new file
-      c = OpenSSL::Cipher.new('aes-256-cbc')
-
-      # Load encryption Cipher
-      c.key = create_password
+      add  # Add a key
 
       # Initialize an OTP key
-      add
-      save cipher: c, path: save_leaf
+      save path: save_leaf
     end
 
     def add
@@ -60,13 +55,25 @@ module Auth
       end
     end
 
-    def save(cipher:, path:)
-      data = { iv: cipher.random_iv.to_s }
+    def save(path:)
+      # Create the cipher since it is a new file
+      cipher = OpenSSL::Cipher.new('aes-256-cbc')
 
-      @otp_key.each_with_index do |name, secret|
+      data = { iv: cipher.random_iv.to_s }
+      throw 'No Data' unless @otp_key.keys.count > 0
+
+      puts "Keys: #{@otp_key.keys}"
+      @otp_key.each_key do |name|
+        next if name == :iv
+
         # Encrypt the secret
         cipher.encrypt
-        encrypted = cipher.update(secret)
+
+        # Load encryption Cipher
+        cipher.key = create_password
+        cipher.iv  = data[:iv]
+
+        encrypted = cipher.update(@otp_key[name])
         encrypted << cipher.final
 
         # Stage the data to be saved
@@ -99,10 +106,10 @@ module Auth
         instance_variable_set("@#{h}", ROTP::TOTP.new(dec.to_s, issuer: h.to_s))
       end
 
-      instance_variables.each do |v|
-        next if [:@otp_key].include?(v)
+      data.keys.each do |v|
+        next if [:iv].include?(v)
 
-        list.merge!({ instance_variable_get(v).issuer => instance_variable_get(v).at(Time.now.to_i + 20) })
+        list.merge!({ instance_variable_get("@#{v}").issuer => instance_variable_get("@#{v}").at(Time.now.to_i + 20) })
       end
       puts list.map { |k, v| "#{k}: #{v}" }.sort
     end
