@@ -21,46 +21,86 @@ module Auth
       syms: ['!', '@', '#', '$', '%', '&', '*', '+', '=', '-']
     }.freeze
 
+    PTH = {
+      OTP: ENV['OTP'],
+      XDG_CONFIG_HOME: "#{ENV['XDG_CONFIG_HOME']}/auth.otp",
+      HOME: "#{ENV['HOME']}/.config/auth.otp"
+    }.freeze
 
     def initialize
-      @otp_key = {}
-      leaf = ENV['OTP'] || "#{ENV['HOME']}/.config/otp.yml"
+      @otp_key = Hash.new
 
-      File.file?(leaf) ? (read leaf) : (create leaf)
+      File.file?(leaf) ? read : create
     end
 
-    def create_password
+    def self.add
+      more = 'y'
+
+      while more =~ /y/
+        # Prompt user for OTP service and secret
+        @otp_key.merge!({ HighLine.new.ask(MSG[:name]) => HighLine.new.ask(MSG[:secret]) })
+
+        more = HighLine.new.ask(MSG[:more])
+      end
+    end
+
+    def self.create(save_leaf: determine_config)
+      exit if File.exist? save_leaf
+
+      add # Add a key
+
+      # Initialize an OTP key
+      save path: save_leaf
+    end
+
+    def self.create_password
       Digest::SHA1.hexdigest(ask(MSG[:create]) { |io| io.echo = MSG[:syms].sample })
                   .chars
                   .first(32)
                   .join
     end
 
-    def create(save_leaf)
-      exit if File.exist? save_leaf
+    def self.determine_config
+      %w[OTP XDG_CONFIG_HOME HOME].each do |config|
+        next if ENV[config].nil?
 
-      add  # Add a key
-
-      # Initialize an OTP key
-      save path: save_leaf
-    end
-
-    def add
-      more = 'y'
-
-      while more =~ /y/
-        # Prompt user for OTP service and secret
-        @otp_key.merge!({ HighLine.new.ask(MSG[:name]) => HighLine.new.ask(MSG[:secret]) })
-        more = HighLine.new.ask(MSG[:more])
+        return PTH[config.to_sym]
       end
     end
 
-    def save(path:)
+    def self.read(leaf: determine_config)
+      data = YAML.load_file leaf
+      list = {}
+      cipher = OpenSSL::Cipher.new('aes-256-cbc')
+      cipher.decrypt
+      cipher.iv = data[:iv]
+      cipher.key = Digest::SHA1.hexdigest(
+        ask('Encryption Passphrase: ') { |io| io.echo = MSG[:syms].sample }
+      ).chars.first(32).join
+
+      data.each do |h, k|
+        next if h == :iv
+
+        dec = cipher.update(k)
+        dec << cipher.final
+        instance_variable_set("@#{h}", ROTP::TOTP.new(dec.to_s, issuer: h.to_s))
+      end
+
+      data.each_key do |v|
+        next if [:iv].include?(v)
+
+        list.merge!({ instance_variable_get("@#{v}").issuer => instance_variable_get("@#{v}").at(Time.now.to_i) })
+      end
+      puts list.map { |k, v| "#{k}: #{v}" }.sort
+    end
+
+    def self.save(path: determine_config)
+      throw "Cowardly refusing to overwrite #{path}" if File.file?(path)
       # Create the cipher since it is a new file
       cipher = OpenSSL::Cipher.new('aes-256-cbc')
 
       data = { iv: cipher.random_iv.to_s }
-      throw 'No Data' unless @otp_key.keys.count > 0
+      throw 'No Data' unless @otp_key.keys.count.positive?
 
       puts "Keys: #{@otp_key.keys}"
       @otp_key.each_key do |name|
@@ -83,37 +123,5 @@ module Auth
       # Save the OTP file
       File.write(path, data.to_yaml, mode: 'wb')
     end
-
-    def delete(otpe); end
-
-    def destroy(otpc); end
-
-    def read(leaf)
-      data = YAML.load_file leaf
-      list = {}
-      cipher = OpenSSL::Cipher.new('aes-256-cbc')
-      cipher.decrypt
-      cipher.iv = data[:iv]
-      cipher.key = Digest::SHA1.hexdigest(
-        ask('Encryption Passphrase: ') { |io| io.echo = MSG[:syms].sample }
-      ).chars.first(32).join
-
-      data.each do |h, k|
-        next if h == :iv
-
-        dec = cipher.update(k)
-        dec << cipher.final
-        instance_variable_set("@#{h}", ROTP::TOTP.new(dec.to_s, issuer: h.to_s))
-      end
-
-      data.keys.each do |v|
-        next if [:iv].include?(v)
-
-        list.merge!({ instance_variable_get("@#{v}").issuer => instance_variable_get("@#{v}").at(Time.now.to_i) })
-      end
-      puts list.map { |k, v| "#{k}: #{v}" }.sort
-    end
-    nil
   end
-  nil
-end; nil
+end
